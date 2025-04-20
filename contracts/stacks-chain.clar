@@ -147,3 +147,44 @@
         (var-set last-event-id event-id)
         (ok event-id))
       (err ERR_EVENT_EMISSION_FAILED))))
+
+;; Public functions
+
+;; Submits a new research proposal to the DA
+(define-public (submit-proposal (title (string-ascii 100)) 
+    (description (string-utf8 1000)) (requested-amount uint) 
+    (milestones (list 5 (string-ascii 100))) (deadline uint))
+  (let
+    (
+      (proposal-id (+ (var-get proposal-count) u1))
+      (researcher-reputation (default-to u0 (map-get? ResearcherReputation tx-sender)))
+      (truncated-description (unwrap-panic (as-max-len? description u500)))
+    )
+    (asserts! (> requested-amount u0) ERR_INVALID_AMOUNT)
+    (asserts! (> deadline stacks-block-height) ERR_INVALID_DEADLINE)
+    (asserts! (> (len milestones) u0) ERR_INVALID_MILESTONES)
+    (asserts! (>= researcher-reputation (var-get min-reputation-for-proposal)) ERR_INSUFFICIENT_REPUTATION)
+    (asserts! (is-none (map-get? ActiveResearcherProposals tx-sender)) ERR_ACTIVE_PROPOSAL_EXISTS)
+
+    (match (update-proposal proposal-id
+      {
+        researcher: tx-sender,
+        title: title,
+        description: description,
+        requested-amount: requested-amount,
+        status: "pending",
+        funded-amount: u0,
+        milestones: milestones,
+        deadline: deadline,
+        review-count: u0,
+        average-rating: u0,
+        escrow-amount: u0
+      })
+      update-success (begin
+        (var-set proposal-count proposal-id)
+        (map-set ActiveResearcherProposals tx-sender proposal-id)
+        (match (emit-event "proposal-submitted" proposal-id truncated-description)
+          emit-success (ok proposal-id)
+          emit-error emit-error))
+      update-error update-error))
+)
