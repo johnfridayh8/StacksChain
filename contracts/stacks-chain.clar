@@ -227,3 +227,46 @@
       error (err ERR_INSUFFICIENT_FUNDS))
   )
 )
+
+;; Approves a pending proposal (contract owner only)
+(define-public (approve-proposal (proposal-id uint))
+  (let
+    ((proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND))))
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_NOT_AUTHORIZED))
+    (asserts! (is-eq (get status proposal) "pending") (err ERR_INVALID_STATUS))
+    (match (update-proposal proposal-id
+      (merge proposal { status: "approved" }))
+      update-success 
+        (match (emit-event "proposal-approved" proposal-id u"Proposal approved")
+          emit-success (ok true)
+          emit-error (err ERR_EVENT_EMISSION_FAILED))
+      update-error (err ERR_MAP_UPDATE_FAILED))
+  )
+)
+
+;; Submits a review and rating for a proposal
+(define-public (submit-review (proposal-id uint) (rating uint) (comment (string-utf8 500)))
+  (let
+    ((proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND)))
+     (existing-review (map-get? Reviews { proposal-id: proposal-id, reviewer: tx-sender })))
+    (asserts! (and (>= rating u1) (<= rating u5)) (err ERR_INVALID_REVIEW))
+    (asserts! (is-none existing-review) (err ERR_ALREADY_REVIEWED))
+    (if (map-set Reviews
+          { proposal-id: proposal-id, reviewer: tx-sender }
+          { rating: rating, comment: comment })
+      (let
+        ((new-review-count (+ (get review-count proposal) u1))
+         (new-average-rating (/ (+ (* (get average-rating proposal) (get review-count proposal)) rating) new-review-count)))
+        (if (map-set Proposals
+              { proposal-id: proposal-id }
+              (merge proposal {
+                review-count: new-review-count,
+                average-rating: new-average-rating
+              }))
+          (match (emit-event "review-submitted" proposal-id comment)
+            success (ok true)
+            error (err ERR_EVENT_EMISSION_FAILED))
+          (err ERR_MAP_UPDATE_FAILED)))
+      (err ERR_MAP_UPDATE_FAILED))
+  )
+)
