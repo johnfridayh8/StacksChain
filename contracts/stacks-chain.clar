@@ -270,3 +270,40 @@
       (err ERR_MAP_UPDATE_FAILED))
   )
 )
+
+;; Releases funds to a researcher after successful completion (contract owner only)
+(define-public (release-funds (proposal-id uint))
+  (let
+    ((proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND))))
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_NOT_AUTHORIZED))
+    (asserts! (is-eq (get status proposal) "funded") (err ERR_INVALID_STATUS))
+    (asserts! (>= (get review-count proposal) u3) (err ERR_NOT_ENOUGH_REVIEWS))
+    (asserts! (>= (get average-rating proposal) u4) (err ERR_INVALID_REVIEW))
+    (match (as-contract (stx-transfer? (get escrow-amount proposal) tx-sender (get researcher proposal)))
+      transfer-result 
+        (if (map-set Proposals
+              { proposal-id: proposal-id }
+              (merge proposal {
+                status: "completed",
+                escrow-amount: u0
+              }))
+          (if (map-set ResearcherReputation
+                (get researcher proposal)
+                (+ (default-to u0 (map-get? ResearcherReputation (get researcher proposal))) u1))
+            (match (emit-event "funds-released" proposal-id u"Funds released to researcher")
+              event-result (ok true)
+              event-error (err ERR_EVENT_EMISSION_FAILED))
+            (err ERR_MAP_UPDATE_FAILED))
+          (err ERR_MAP_UPDATE_FAILED))
+      transfer-error (err ERR_INSUFFICIENT_FUNDS))
+  )
+)
+
+;; Sets the minimum reputation required to submit proposals (contract owner only)
+(define-public (set-min-reputation (new-min-reputation uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
+    (var-set min-reputation-for-proposal new-min-reputation)
+    (ok true)
+  )
+)
