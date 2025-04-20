@@ -169,7 +169,7 @@
 
 (define-private (validate-review-input (proposal-id uint) (rating uint) (comment (string-utf8 500)))
   (and
-    (is-valid-proposal-id proposal-id)
+    (validate-proposal-id proposal-id)
     (and (>= rating u1) (<= rating u5))
     (<= (len comment) MAX_EVENT_LENGTH)
   )
@@ -290,6 +290,9 @@
      (existing-review (map-get? Reviews { proposal-id: proposal-id, reviewer: tx-sender })))
     (asserts! (and (>= rating u1) (<= rating u5)) (err ERR_INVALID_REVIEW))
     (asserts! (is-none existing-review) (err ERR_ALREADY_REVIEWED))
+    (asserts! (validate-proposal-id proposal-id) (err ERR_PROPOSAL_NOT_FOUND))
+    (asserts! (validate-review-input proposal-id rating comment) (err ERR_INVALID_REVIEW))
+    (asserts! (is-none (map-get? Reviews { proposal-id: proposal-id, reviewer: tx-sender })) (err ERR_ALREADY_REVIEWED))
     (if (map-set Reviews
           { proposal-id: proposal-id, reviewer: tx-sender }
           { rating: rating, comment: comment })
