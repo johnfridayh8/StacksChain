@@ -52,3 +52,55 @@
     escrow-amount: uint
   }
 )
+
+(define-map ResearcherBalance principal uint)
+(define-map ResearcherReputation principal uint)
+(define-map Reviews { proposal-id: uint, reviewer: principal } { rating: uint, comment: (string-utf8 500) })
+(define-map Votes { proposal-id: uint, voter: principal } uint)
+(define-map ActiveResearcherProposals principal uint)
+
+(define-map Events 
+  { event-id: uint } 
+  { 
+    event-type: (string-ascii 20),
+    proposal-id: uint,
+    data: (string-utf8 500)
+  }
+)
+
+;; Define variables
+(define-data-var proposal-count uint u0)
+(define-data-var total-funds uint u0)
+(define-data-var min-reputation-for-proposal uint u10)
+(define-data-var last-event-id uint u0)
+
+;; Helper functions
+
+;; Updates a proposal with new data
+(define-private (update-proposal (proposal-id uint) (proposal {researcher: principal, title: (string-ascii 100), 
+    description: (string-utf8 1000), requested-amount: uint, status: (string-ascii 20), funded-amount: uint, 
+    milestones: (list 5 (string-ascii 100)), deadline: uint, review-count: uint, average-rating: uint, escrow-amount: uint}))
+  (if (map-set Proposals { proposal-id: proposal-id } proposal)
+    (ok true)
+    (err ERR_MAP_UPDATE_FAILED)))
+
+;; Updates a specific milestone in a milestone list
+(define-private (update-milestone-at-index 
+  (milestones (list 5 (string-ascii 100))) 
+  (index uint) 
+  (new-milestone (string-ascii 100))
+)
+  (let
+    ((len (len milestones)))
+    (asserts! (< index len) ERR_INVALID_MILESTONE_INDEX)
+    (ok (get result (fold update-milestone-fold 
+      milestones
+      {
+        current-index: u0,
+        target-index: index,
+        new-milestone: new-milestone,
+        result: (list)
+      }
+    )))
+  )
+)
