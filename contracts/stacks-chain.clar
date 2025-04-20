@@ -82,7 +82,8 @@
     milestones: (list 5 (string-ascii 100)), deadline: uint, review-count: uint, average-rating: uint, escrow-amount: uint}))
   (if (map-set Proposals { proposal-id: proposal-id } proposal)
     (ok true)
-    (err ERR_MAP_UPDATE_FAILED)))
+    (err ERR_MAP_UPDATE_FAILED))
+)
 
 ;; Updates a specific milestone in a milestone list
 (define-private (update-milestone-at-index 
@@ -146,7 +147,38 @@
       (begin
         (var-set last-event-id event-id)
         (ok event-id))
-      (err ERR_EVENT_EMISSION_FAILED))))
+      (err ERR_EVENT_EMISSION_FAILED))
+    )
+)
+
+(define-private (is-valid-proposal-id (proposal-id uint))
+  (and 
+    (> proposal-id u0)
+    (<= proposal-id (var-get proposal-count))
+  )
+)
+
+(define-private (validate-proposal-id (proposal-id uint))
+  (and 
+    (> proposal-id u0)
+    (<= proposal-id (var-get proposal-count))
+    (is-some (map-get? Proposals { proposal-id: proposal-id }))
+  )
+)
+
+(define-private (validate-review-input (proposal-id uint) (rating uint) (comment (string-utf8 500)))
+  (and
+    (is-valid-proposal-id proposal-id)
+    (and (>= rating u1) (<= rating u5))
+    (<= (len comment) MAX_EVENT_LENGTH)
+  )
+)
+
+(define-private (validate-description (description (string-utf8 1000)))
+  (let ((len (len description)))
+    (and (> len u0) (<= len MAX_DESCRIPTION_LENGTH))
+  )
+)
 
 ;; Public functions
 
@@ -199,6 +231,8 @@
     (asserts! (>= current-balance amount) (err ERR_INSUFFICIENT_FUNDS))
     (asserts! (is-eq (get status proposal) "approved") (err ERR_INVALID_STATUS))
     (asserts! (<= (get deadline proposal) stacks-block-height) (err ERR_DEADLINE_PASSED))
+    (asserts! (is-valid-proposal-id proposal-id) (err ERR_PROPOSAL_NOT_FOUND))
+    (asserts! (> amount u0) (err ERR_INVALID_AMOUNT))
     (match (stx-transfer? amount tx-sender (as-contract tx-sender))
       success
         (let
@@ -232,6 +266,9 @@
 (define-public (approve-proposal (proposal-id uint))
   (let
     ((proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND))))
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_NOT_AUTHORIZED))
+    (asserts! (is-eq (get status proposal) "pending") (err ERR_INVALID_STATUS))
+    (asserts! (is-valid-proposal-id proposal-id) (err ERR_PROPOSAL_NOT_FOUND))
     (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_NOT_AUTHORIZED))
     (asserts! (is-eq (get status proposal) "pending") (err ERR_INVALID_STATUS))
     (match (update-proposal proposal-id
@@ -273,29 +310,38 @@
 
 ;; Releases funds to a researcher after successful completion (contract owner only)
 (define-public (release-funds (proposal-id uint))
-  (let
-    ((proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND))))
-    (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_NOT_AUTHORIZED))
-    (asserts! (is-eq (get status proposal) "funded") (err ERR_INVALID_STATUS))
-    (asserts! (>= (get review-count proposal) u3) (err ERR_NOT_ENOUGH_REVIEWS))
-    (asserts! (>= (get average-rating proposal) u4) (err ERR_INVALID_REVIEW))
-    (match (as-contract (stx-transfer? (get escrow-amount proposal) tx-sender (get researcher proposal)))
-      transfer-result 
-        (if (map-set Proposals
-              { proposal-id: proposal-id }
-              (merge proposal {
-                status: "completed",
-                escrow-amount: u0
-              }))
-          (if (map-set ResearcherReputation
-                (get researcher proposal)
-                (+ (default-to u0 (map-get? ResearcherReputation (get researcher proposal))) u1))
-            (match (emit-event "funds-released" proposal-id u"Funds released to researcher")
-              event-result (ok true)
-              event-error (err ERR_EVENT_EMISSION_FAILED))
+  (begin
+    ;; Validate proposal ID first
+    (asserts! (is-valid-proposal-id proposal-id) (err ERR_PROPOSAL_NOT_FOUND))
+    
+    (let
+      ((proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND))))
+      (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_NOT_AUTHORIZED))
+      (asserts! (is-eq (get status proposal) "funded") (err ERR_INVALID_STATUS))
+      (asserts! (>= (get review-count proposal) u3) (err ERR_NOT_ENOUGH_REVIEWS))
+      (asserts! (>= (get average-rating proposal) u4) (err ERR_INVALID_REVIEW))
+      
+      ;; Make sure escrow amount exists
+      (asserts! (> (get escrow-amount proposal) u0) (err ERR_INSUFFICIENT_FUNDS))
+      
+      (match (as-contract (stx-transfer? (get escrow-amount proposal) tx-sender (get researcher proposal)))
+        transfer-result 
+          (if (map-set Proposals
+                { proposal-id: proposal-id }
+                (merge proposal {
+                  status: "completed",
+                  escrow-amount: u0
+                }))
+            (if (map-set ResearcherReputation
+                  (get researcher proposal)
+                  (+ (default-to u0 (map-get? ResearcherReputation (get researcher proposal))) u1))
+              (match (emit-event "funds-released" proposal-id u"Funds released to researcher")
+                event-result (ok true)
+                event-error (err ERR_EVENT_EMISSION_FAILED))
+              (err ERR_MAP_UPDATE_FAILED))
             (err ERR_MAP_UPDATE_FAILED))
-          (err ERR_MAP_UPDATE_FAILED))
-      transfer-error (err ERR_INSUFFICIENT_FUNDS))
+        transfer-error (err ERR_INSUFFICIENT_FUNDS))
+    )
   )
 )
 
