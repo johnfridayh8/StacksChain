@@ -32,6 +32,7 @@
 (define-constant ERR_INVALID_MILESTONE_INDEX (err u114))
 (define-constant ERR_MAP_UPDATE_FAILED (err u115))
 (define-constant ERR_INVALID_MILESTONE (err u116))
+(define-constant ERR_INVALID_DESCRIPTION (err u117))
 (define-constant MAX_EVENT_LENGTH u500)
 (define-constant MAX_DESCRIPTION_LENGTH u500)
 
@@ -197,6 +198,7 @@
     (asserts! (> (len milestones) u0) ERR_INVALID_MILESTONES)
     (asserts! (>= researcher-reputation (var-get min-reputation-for-proposal)) ERR_INSUFFICIENT_REPUTATION)
     (asserts! (is-none (map-get? ActiveResearcherProposals tx-sender)) ERR_ACTIVE_PROPOSAL_EXISTS)
+    (asserts! (validate-description truncated-description) ERR_INVALID_DESCRIPTION)
 
     (match (update-proposal proposal-id
       {
@@ -349,6 +351,7 @@
 (define-public (set-min-reputation (new-min-reputation uint))
   (begin
     (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_NOT_AUTHORIZED)
+    (asserts! (> new-min-reputation u0) ERR_INVALID_AMOUNT)
     (var-set min-reputation-for-proposal new-min-reputation)
     (ok true)
   )
