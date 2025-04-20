@@ -104,3 +104,46 @@
     )))
   )
 )
+
+;; Helper function for the milestone update process
+(define-private (update-milestone-fold
+  (milestone (string-ascii 100))
+  (state { 
+    current-index: uint, 
+    target-index: uint, 
+    new-milestone: (string-ascii 100), 
+    result: (list 5 (string-ascii 100))
+  })
+)
+  (let
+    (
+      (updated-result (unwrap-panic (as-max-len? 
+        (append (get result state) 
+          (if (is-eq (get current-index state) (get target-index state))
+              (get new-milestone state)
+              milestone))
+        u5)))
+    )
+    (merge state { 
+      current-index: (+ (get current-index state) u1),
+      result: updated-result
+    })
+  )
+)
+
+;; Emits an event to the blockchain for tracking important actions
+(define-private (emit-event (event-type (string-ascii 20)) (proposal-id uint) (data (string-utf8 500)))
+  (let
+    ((event-id (+ (var-get last-event-id) u1))
+     (truncated-data (unwrap-panic (as-max-len? data u500))))
+    (if (map-set Events
+         { event-id: event-id }
+         {
+           event-type: event-type,
+           proposal-id: proposal-id,
+           data: truncated-data
+         })
+      (begin
+        (var-set last-event-id event-id)
+        (ok event-id))
+      (err ERR_EVENT_EMISSION_FAILED))))
