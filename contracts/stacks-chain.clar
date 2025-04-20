@@ -188,3 +188,42 @@
           emit-error emit-error))
       update-error update-error))
 )
+
+;; Funds a proposal with STX tokens
+(define-public (fund-proposal (proposal-id uint) (amount uint))
+  (let
+    (
+      (proposal (unwrap! (map-get? Proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND)))
+      (current-balance (stx-get-balance tx-sender))
+    )
+    (asserts! (>= current-balance amount) (err ERR_INSUFFICIENT_FUNDS))
+    (asserts! (is-eq (get status proposal) "approved") (err ERR_INVALID_STATUS))
+    (asserts! (<= (get deadline proposal) stacks-block-height) (err ERR_DEADLINE_PASSED))
+    (match (stx-transfer? amount tx-sender (as-contract tx-sender))
+      success
+        (let
+          ((new-funded-amount (+ (get funded-amount proposal) amount))
+           (new-status (if (>= new-funded-amount (get requested-amount proposal))
+                           "funded"
+                           "partially-funded")))
+          (var-set total-funds (+ (var-get total-funds) amount))
+          (match (update-proposal proposal-id
+            (merge proposal {
+              status: new-status,
+              funded-amount: new-funded-amount,
+              escrow-amount: (+ (get escrow-amount proposal) amount)
+            }))
+            update-success 
+              (let
+                ((researcher-balance (default-to u0 (map-get? ResearcherBalance (get researcher proposal)))))
+                (if (map-set ResearcherBalance
+                     (get researcher proposal)
+                     (+ researcher-balance amount))
+                  (match (emit-event "proposal-funded" proposal-id u"Proposal funded")
+                    emit-success (ok true)
+                    emit-error (err ERR_EVENT_EMISSION_FAILED))
+                  (err ERR_MAP_UPDATE_FAILED)))
+            update-error (err ERR_MAP_UPDATE_FAILED)))
+      error (err ERR_INSUFFICIENT_FUNDS))
+  )
+)
